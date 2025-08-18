@@ -1,8 +1,94 @@
 # Implementation of contexualized extraction: Frist extract properties separately then link it with correponds synthesis routes via description of that material.
 
+from dotenv import load_dotenv,find_dotenv
+load_dotenv(find_dotenv())
+from typing import Optional
+from pydantic import BaseModel, Field, create_model
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+
+import syn_template
+from prompt import *
 
 # suppose paragraphs are correctly labeled
+# First we need to categorize the paper based on whether the material are distinctly identified
+import dspy
+dspy.configure(lm=dspy.LM("openai/gpt-4.1-mini", temperature=0.0))
+class SynCategorization(dspy.Signature):
+    """system prompt"""
+    text: str = dspy.InputField(description="The experimental section of a high entropy alloys (HEAs) research paper.")
+    output: bool = dspy.OutputField()
+SynCategorization.__doc__ = CATEGORIZE_DSPY
+categorize_agent = dspy.ChainOfThought(SynCategorization)
 
 # Define extraction agent for each property, here we test for (ys, uts, strain) & phase
+class MaterialDescriptionBase(BaseModel):
+    composition: Optional[str] = Field(description="Chemical composition of the material, e.g., 'Mn0.2CoCrNi'")
+    description: str = Field(description="Description of the material, e.g., 'as-cast', 'annealed at 900C'")
 
+class StrengthTestBase(BaseModel):
+    """Tensile/Compressive test results"""
+    ys: Optional[str] = Field(description="Yield strength with unit")
+    uts: Optional[str] = Field(description="Ultimate tensile/compressive strength with unit")
+    strain: Optional[str] = Field(description="Fracture strain with unit")
+    temperature: Optional[str] = Field(description="Test temperature with unit")
+    strain_rate: Optional[str] = Field(description="Strain rate with unit")
 
+class PhaseInfo(BaseModel):
+    """Phase information"""
+    phases: Optional[str] = Field(description="List of phases present in the material")
+
+def build_result_model(name: str, doc:str, *bases):
+    r = create_model(name, __base__=bases, __doc__=doc)
+    return create_model('Records', records=(Optional[list[r]], ...))
+
+Strength = build_result_model("Strength", "Strength test results with material description", MaterialDescriptionBase, StrengthTestBase)
+Phase = build_result_model("Phase", "Phase information with material description", MaterialDescriptionBase, PhaseInfo)
+
+model = ChatOpenAI(model="gpt-4.1-mini", temperature=0.0)
+strength_extraction_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACT_PROPERTY_SYS_GENERIC_PROMPT),
+        ("user", STRENGTH_PROMPT),
+    ]
+)
+phase_extraction_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACT_PROPERTY_SYS_GENERIC_PROMPT),
+        ("user", PHASE_PROMPT),
+    ]
+)
+strength_extraction_agent = strength_extraction_prompt | model.with_structured_output(Strength)
+phase_extraction_agent = phase_extraction_prompt | model.with_structured_output(Phase)
+
+# Define process and extract it
+class Processes(BaseModel):
+    """Processing route for a material"""
+    processes: list[str] = Field(description="List of processing steps in chronological order, for each as a python dictionary. For example: [{'induction melting': {'temperature': 1500}}, {'annealed': {'temperature': 800, 'duration': '1h'}}]")
+    
+
+processes_format_dict = {k: v for k, v in syn_template.__dict__.items() if not k.startswith('__') and not callable(v)}
+def format_processes(processes: list[str]) -> str:
+    format_string = ""
+    for process in processes:
+        if process not in processes_format_dict:
+            continue
+        format_string += f"{processes_format_dict[process]}\n"
+    return format_string.strip()
+process_extraction_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACT_PROCESS_SYS_GENERIC_PROMPT),
+        ("user", PROCESS_PROMPT),
+    ]
+)
+process_extraction_agent = process_extraction_prompt | model.with_structured_output(Processes)
+test_text = """
+The HEA with a nominal composition of V10Cr15Mn5Fe35Co10Ni25 (at%) was fabricated using vacuum induction melting furnace using pure elements of V, Cr, Mn, Fe, Co, and Ni (purity >99.9%). The as-cast sample was subjected to homogenization heat treatment at 1100 °C for 6 h under an Ar atmosphere, followed by water quenching. The homogenized sample was cold rolled through multiple passes with a final rolling reduction ratio of ≈79% (from 6.2 to 1.3 mm). The disk-shaped samples (10 mm diameter) were prepared from the cold rolled sheet using electro-discharge machining. The disk samples were annealed at two different conditions (900 °C for 10 min and 1100 °C for 60 min) to obtain microstructure with fine grains and coarse grains, respectively. Finally, the HPT process was carried out on the annealed samples at different turns (N = 1/4, 1, and 5) using a pressure of 6 GPa and a rotation rate of 1 revolution per minute (rpm)label.
+"""
+print(process_extraction_agent.invoke(
+    {
+        "material_description": "V10Cr15Mn5Fe35Co10Ni25: FG sample before HPT processing (N=0)",
+        "process_format": format_processes(["induction_melting", "homogenized", "quenching", "cold_rolled", "annealed", "high_pressure_torsion"]),
+        "text": test_text
+    }
+))

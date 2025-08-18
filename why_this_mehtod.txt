@@ -1,0 +1,6 @@
+why we need to combine paragraphs?  
+some data are scatter in the paper:
+  such as stress-strain test, the strain rate are normally in the different text with value of stress.
+
+data liking need semantic understanding.
+

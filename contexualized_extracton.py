@@ -22,9 +22,14 @@ SynCategorization.__doc__ = CATEGORIZE_DSPY
 categorize_agent = dspy.ChainOfThought(SynCategorization)
 
 # Define extraction agent for each property, here we test for (ys, uts, strain) & phase
+class Material(BaseModel):
+    composition: Optional[str] = Field(description="Chemical composition of the material, e.g., 'Mn0.2CoCrNi'")
+
 class MaterialDescriptionBase(BaseModel):
     composition: Optional[str] = Field(description="Chemical composition of the material, e.g., 'Mn0.2CoCrNi'")
-    description: str = Field(description="Description of the material, e.g., 'as-cast', 'annealed at 900C'")
+    description: Optional[str] = Field(description="Description of the material. Give the description based on the processing method, e.g., 'as-cast', 'annealed at 900C'. Do not contain test condition which describes the testing setup rather than the material itself, such as tested under 700C, under salted environment. If material is given with composition only, without any description, return None.")
+    refered: bool = Field(description="Indicate whether the material data is cited from other publications for comparison purposes.")
+
 
 class StrengthTestBase(BaseModel):
     """Tensile/Compressive test results"""
@@ -33,6 +38,7 @@ class StrengthTestBase(BaseModel):
     strain: Optional[str] = Field(description="Fracture strain with unit")
     temperature: Optional[str] = Field(description="Test temperature with unit")
     strain_rate: Optional[str] = Field(description="Strain rate with unit")
+    other_test_conditions: str = Field(description="Other test conditions, like in salt, hydrogen charging, etc.")
 
 class PhaseInfo(BaseModel):
     """Phase information"""
@@ -62,9 +68,10 @@ strength_extraction_agent = strength_extraction_prompt | model.with_structured_o
 phase_extraction_agent = phase_extraction_prompt | model.with_structured_output(Phase)
 
 # Define process and extract it
-class Processes(BaseModel):
+class Processes(Material):
     """Processing route for a material"""
     processes: list[str] = Field(description="List of processing steps in chronological order, for each as a python dictionary. For example: [{'induction melting': {'temperature': 1500}}, {'annealed': {'temperature': 800, 'duration': '1h'}}]")
+    
     
 
 processes_format_dict = {k: v for k, v in syn_template.__dict__.items() if not k.startswith('__') and not callable(v)}
@@ -82,13 +89,24 @@ process_extraction_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 process_extraction_agent = process_extraction_prompt | model.with_structured_output(Processes)
-test_text = """
-The HEA with a nominal composition of V10Cr15Mn5Fe35Co10Ni25 (at%) was fabricated using vacuum induction melting furnace using pure elements of V, Cr, Mn, Fe, Co, and Ni (purity >99.9%). The as-cast sample was subjected to homogenization heat treatment at 1100 °C for 6 h under an Ar atmosphere, followed by water quenching. The homogenized sample was cold rolled through multiple passes with a final rolling reduction ratio of ≈79% (from 6.2 to 1.3 mm). The disk-shaped samples (10 mm diameter) were prepared from the cold rolled sheet using electro-discharge machining. The disk samples were annealed at two different conditions (900 °C for 10 min and 1100 °C for 60 min) to obtain microstructure with fine grains and coarse grains, respectively. Finally, the HPT process was carried out on the annealed samples at different turns (N = 1/4, 1, and 5) using a pressure of 6 GPa and a rotation rate of 1 revolution per minute (rpm)label.
-"""
-print(process_extraction_agent.invoke(
-    {
-        "material_description": "V10Cr15Mn5Fe35Co10Ni25: FG sample before HPT processing (N=0)",
-        "process_format": format_processes(["induction_melting", "homogenized", "quenching", "cold_rolled", "annealed", "high_pressure_torsion"]),
-        "text": test_text
-    }
-))
+# test_text = """
+# The HEA with a nominal composition of V10Cr15Mn5Fe35Co10Ni25 (at%) was fabricated using vacuum induction melting furnace using pure elements of V, Cr, Mn, Fe, Co, and Ni (purity >99.9%). The as-cast sample was subjected to homogenization heat treatment at 1100 °C for 6 h under an Ar atmosphere, followed by water quenching. The homogenized sample was cold rolled through multiple passes with a final rolling reduction ratio of ≈79% (from 6.2 to 1.3 mm). The disk-shaped samples (10 mm diameter) were prepared from the cold rolled sheet using electro-discharge machining. The disk samples were annealed at two different conditions (900 °C for 10 min and 1100 °C for 60 min) to obtain microstructure with fine grains and coarse grains, respectively. Finally, the HPT process was carried out on the annealed samples at different turns (N = 1/4, 1, and 5) using a pressure of 6 GPa and a rotation rate of 1 revolution per minute (rpm)label.
+# """
+# print(process_extraction_agent.invoke(
+#     {
+#         "material_description": "V10Cr15Mn5Fe35Co10Ni25: FG sample before HPT processing (N=0)",
+#         "process_format": format_processes(["induction_melting", "homogenized", "quenching", "cold_rolled", "annealed", "high_pressure_torsion"]),
+#         "text": test_text
+#     }
+# ))
+
+# Build a dict to collect material and correspond processing routes
+material_process_d = {}
+def extract_process(property, processing_format, material_process_dict):
+    composition, description = property.composition, property.description
+    if not any(composition, description):
+        return
+    if description in material_process_dict:
+        return material_process_dict[description]["processes"]
+    # else find same description
+

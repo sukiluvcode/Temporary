@@ -70,7 +70,7 @@ phase_extraction_agent = phase_extraction_prompt | model.with_structured_output(
 # Define process and extract it
 class Processes(Material):
     """Processing route for a material"""
-    processes: list[str] = Field(description="List of processing steps in chronological order, for each as a python dictionary. For example: [{'induction melting': {'temperature': 1500}}, {'annealed': {'temperature': 800, 'duration': '1h'}}]")
+    processes: str = Field(description="List of processing steps in chronological order, for each as a python dictionary. For example: [{'induction melting': {'temperature': 1500}}, {'annealed': {'temperature': 800, 'duration': '1h'}}]")
     
     
 
@@ -89,24 +89,73 @@ process_extraction_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 process_extraction_agent = process_extraction_prompt | model.with_structured_output(Processes)
-# test_text = """
-# The HEA with a nominal composition of V10Cr15Mn5Fe35Co10Ni25 (at%) was fabricated using vacuum induction melting furnace using pure elements of V, Cr, Mn, Fe, Co, and Ni (purity >99.9%). The as-cast sample was subjected to homogenization heat treatment at 1100 °C for 6 h under an Ar atmosphere, followed by water quenching. The homogenized sample was cold rolled through multiple passes with a final rolling reduction ratio of ≈79% (from 6.2 to 1.3 mm). The disk-shaped samples (10 mm diameter) were prepared from the cold rolled sheet using electro-discharge machining. The disk samples were annealed at two different conditions (900 °C for 10 min and 1100 °C for 60 min) to obtain microstructure with fine grains and coarse grains, respectively. Finally, the HPT process was carried out on the annealed samples at different turns (N = 1/4, 1, and 5) using a pressure of 6 GPa and a rotation rate of 1 revolution per minute (rpm)label.
-# """
-# print(process_extraction_agent.invoke(
-#     {
-#         "material_description": "V10Cr15Mn5Fe35Co10Ni25: FG sample before HPT processing (N=0)",
-#         "process_format": format_processes(["induction_melting", "homogenized", "quenching", "cold_rolled", "annealed", "high_pressure_torsion"]),
-#         "text": test_text
-#     }
-# ))
+
+
+
 
 # Build a dict to collect material and correspond processing routes
-material_process_d = {}
-def extract_process(property, processing_format, material_process_dict):
-    composition, description = property.composition, property.description
-    if not any(composition, description):
+material_process_d = {} # composed of extracted, e.g. (composition, description) as key, and processes as value
+def extract_process(property: MaterialDescriptionBase, processing_format, material_process_dict, syn_context: str):
+    composition, description, refered = property.composition, property.description, property.refered
+    if refered:
+        # this is a reference, we do not extract processing route
         return
-    if description in material_process_dict:
-        return material_process_dict[description]["processes"]
-    # else find same description
+    if not any([composition, description]):
+        # this is not a valid extraction
+        return
+    if t:=(composition, description) in material_process_dict:
+        return material_process_dict[t]
+    # find same reference if possible, based on composition, description
+    key_index = find_same_reference(composition, description, material_process_dict)
+    if key_index is not None:
+        process = material_process_dict[list(material_process_dict.keys())[key_index]]
+        return process
+    # otherwise, extract processing route
+    process = process_extraction_agent.invoke(
+        {
+            "material_description": f"{composition}: {description}",
+            "process_format": processing_format,
+            "text": syn_context
+        }
+    )
+    return process
 
+def print_comp_description(material_process_dict):
+    table = "| Index | Composition | Description |\n|-------|-------------|-------------|\n"
+    for idx, ((composition, description), _) in enumerate(material_process_dict.items()):
+        table += f"| {idx} | {composition or ''} | {description or ''} |\n"
+    return table
+
+class FindSameReference(dspy.Signature):
+    """Find which row in the table refered to the same material as provided composition and description.
+    Be very strict, only return the index if you are sure, otherwise return None."""
+    table: str = dspy.InputField(description="Table of material composition and description, in markdown format")
+    composition: str = dspy.InputField(description="The composition of the material, e.g., 'Mn0.2CoCrNi'")
+    description: str = dspy.InputField(description="The description of the material, e.g., 'as-cast', 'annealed at 900C'")
+    index: Optional[int] = dspy.OutputField(description="The index of the row")
+get_same_reference_agent = dspy.ChainOfThought(FindSameReference)
+
+def find_same_reference(composition: str, description: str, material_process_dict):
+    if len(material_process_dict) == 0:
+        return None
+    index = get_same_reference_agent(
+        table=print_comp_description(material_process_dict),
+        composition=composition,
+        description=description
+    )
+    return index
+    
+test_text = """
+The HEA with a nominal composition of V10Cr15Mn5Fe35Co10Ni25 (at%) was fabricated using vacuum induction melting furnace using pure elements of V, Cr, Mn, Fe, Co, and Ni (purity >99.9%). The as-cast sample was subjected to homogenization heat treatment at 1100 °C for 6 h under an Ar atmosphere, followed by water quenching. The homogenized sample was cold rolled through multiple passes with a final rolling reduction ratio of ≈79% (from 6.2 to 1.3 mm). The disk-shaped samples (10 mm diameter) were prepared from the cold rolled sheet using electro-discharge machining. The disk samples were annealed at two different conditions (900 °C for 10 min and 1100 °C for 60 min) to obtain microstructure with fine grains and coarse grains, respectively. Finally, the HPT process was carried out on the annealed samples at different turns (N = 1/4, 1, and 5) using a pressure of 6 GPa and a rotation rate of 1 revolution per minute (rpm)label.
+"""
+
+print(extract_process(MaterialDescriptionBase(
+        composition="V10Cr15Mn5Fe35Co10Ni25",
+        description="CG sample after HPT processing (N=5)",
+        refered=False
+    ),
+    format_processes(["induction_melting", "homogenized", "quenching", "cold_rolled", "annealed", "high_pressure_torsion"]),
+    material_process_d,
+    test_text
+)
+)

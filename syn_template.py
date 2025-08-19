@@ -1,6 +1,6 @@
 arc_melting = """\
 arc melting: {
-    "vacuum": True/False,
+    "vacuum": true/false,
     "atmosphere": "",
     "remelting times: ""
 }
@@ -8,7 +8,7 @@ arc melting: {
 
 induction_melting = """\
 induction melting: {
-    "vacuum": True/False,
+    "vacuum": true/false,
     "atmosphere": "",
     "remelting times: ""
 }
@@ -16,7 +16,7 @@ induction melting: {
 
 levitation_melting = """\
 levitation melting: {
-    "vacuum": True/False,
+    "vacuum": true/false,
     "atmosphere": ""
     "remelting times: ""
 }
@@ -48,7 +48,7 @@ homogenized: {
 
 solution_treated = """\
 solution treated: {
-    "vacuum": True/False
+    "vacuum": true/false
     "temperature": "",
     "duration": "",
     "atmosphere": ""

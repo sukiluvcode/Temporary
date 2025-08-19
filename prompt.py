@@ -48,23 +48,26 @@ Here are some common phase types:
 FCC, BCC, HCP, B2, intermetallic compounds (e.g., TiNi, Ti₂Ni, γ' precipitates, silicides, aluminides, sigma (σ) phases), carbides (e.g., WC), oxides (e.g., SiO₂), amorphous phases.
 Guideline for phase extraction:
 - If the author mentions ordered/disordered, include it in the phase information.
+- Same phase can be present multiple times, e.g., "FCC, FCC" extract as "FCC, FCC".
 - Main phase should be listed first, followed by secondary phases, and so on.
 
 text
 {text}
 """
 
-EXTRACT_PROCESS_SYS_GENERIC_PROMPT = """You are an expert in extracting processing routes for materials from scientific texts. Your task is to extract the processing route for the specified material."""
+EXTRACT_PROCESS_SYS_GENERIC_PROMPT = """You are an expert in extracting processing routes for materials from scientific texts."""
 
-PROCESS_PROMPT = """Extract the processing route for below material from provided experimental section.
-**{material_description}**
-
+PROCESS_PROMPT = """Extract the processing route and nominal chemical composition for the specified material from the experimental section.
 Guidance:
-- Note that the sample I give probably be one of many samples synthesised in the experimental section. You only need to extract the processing route for the specified sample.
+- Note that the given sample probably be one of many samples synthesised in the experimental section. You only need to extract the processing route for the specified sample.
+- The composition of the material should be in the form of chemical formula in atom percentage, e.g., "Mn0.2CoCrNi", not any descriptive phrases.
 
-And follow below format rules, may some of them are optional depending on the process:
+And follow below format rules, not all processing methods required, depending on the material:
 {process_format}
 
 Experimental section
 {text}
+
+The sample to extract processing route for is:
+**{material_description}**
 """

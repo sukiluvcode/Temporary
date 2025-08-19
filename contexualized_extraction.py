@@ -159,3 +159,30 @@ print(extract_process(MaterialDescriptionBase(
     test_text
 )
 )
+
+from langchain_core.runnables import RunnableSequence
+def extract_property(input_, agent: RunnableSequence):
+     return agent.invoke(input_).records
+
+def extract_contextualized_main(agents_d: dict[str, list[RunnableSequence]]):
+    # prepare texts
+    paragraphs = ""
+    property_text_d = prepare_property_text(paragraphs, types="")
+    # ...
+    # parallelized
+    results = []
+    for prop, agent in agents_d.items():
+        text = property_text_d[prop]
+        if not text:
+            continue
+        results_prop = extract_property({'text': text}, agent)
+        if results_prop:
+            results.extend(results_prop)
+    # extract processes
+    extract_process()
+    
+
+def prepare_property_text(paragraphs, types: list[str]) -> dict:
+    # merge relevant text
+    pass
+    
